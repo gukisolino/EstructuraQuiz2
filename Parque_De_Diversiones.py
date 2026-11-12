@@ -1,20 +1,23 @@
 """
 UN DÍA EN EL PARQUE  -  versión con interfaz gráfica (tkinter)
 ================================================================
-Un menú con 3 pantallas, cada una usa una estructura distinta:
+Un menú con 4 pantallas. Cada una practica un concepto distinto:
 
-  1. Montaña rusa         -> COLA   (nodos enlazados, FIFO)
-  2. Registro de reclamos -> PILA   (nodos enlazados, LIFO) + "deshacer"
+  1. Montaña rusa         -> COLA (nodos enlazados, FIFO) + RECURSIÓN
+  2. Registro de reclamos -> PILA (nodos enlazados, LIFO) + "deshacer"
   3. Fuegos artificiales  -> RECURSIVIDAD (funciones que se llaman a sí mismas)
+  4. Rueda de Chicago     -> LISTA CIRCULAR ENLAZADA (el último nodo apunta al primero)
 
-Busca estas marcas en el código:  <<< COLA  /  <<< PILA  /  <<< RECURSIÓN
+Busca estas marcas en el código:
+  <<< COLA  /  <<< PILA  /  <<< LISTA CIRCULAR  /  <<< RECURSIÓN
+y los bloques «FUNCIONALIDAD» y «CONCEPTOS» que abren cada pantalla.
 
 CÓMO EXPANDIRLO
   1) Crea una clase nueva que herede de `Pantalla` (implementa `construir`).
   2) Agrégala a la lista PANTALLAS al final del archivo.
   El menú genera la tarjeta nueva automáticamente.
 
-Solo usa la librería estándar (tkinter). Ejecuta:  python un_dia_en_el_parque_gui.py
+Solo usa la librería estándar (tkinter). Ejecuta:  python Parque_De_Diversiones.py
 """
 
 import itertools
@@ -119,6 +122,46 @@ class Pila:                                   # <<< PILA (LIFO)
         return datos
 
 
+class ListaCircular:                          # <<< LISTA CIRCULAR
+    """
+    CONCEPTO: lista enlazada donde el ÚLTIMO nodo apunta al PRIMERO (en vez de None).
+    Por eso se puede dar vueltas sin fin: después del último vuelve el primero.
+    Tres punteros:
+      · `cabeza` -> primer nodo (fijo)
+      · `ultimo` -> último nodo (su `siguiente` es la cabeza: así se cierra el círculo)
+      · `actual` -> nodo "de turno" (en la rueda: la cabina que está en el andén)
+    OJO: como nunca hay None, NO se puede recorrer con `while nodo:` (sería infinito);
+    se recorre exactamente `tamano` veces.
+    """
+    def __init__(self):
+        self.cabeza = None
+        self.ultimo = None
+        self.actual = None
+        self.tamano = 0
+
+    def agregar(self, dato):
+        nuevo = Nodo(dato)
+        if self.cabeza is None:               # lista vacía: el nodo será cabeza, último y actual
+            self.cabeza = self.ultimo = self.actual = nuevo
+        else:
+            self.ultimo.siguiente = nuevo     # el último apunta al nuevo...
+            self.ultimo = nuevo               # ...y el nuevo pasa a ser el último
+        self.ultimo.siguiente = self.cabeza   # el último SIEMPRE cierra el círculo
+        self.tamano += 1
+
+    def girar(self):
+        """Avanza un nodo: si `actual` era el último, vuelve a la cabeza."""
+        self.actual = self.actual.siguiente
+
+    def recorrer(self, inicio):
+        """Nodos desde `inicio`, dando UNA sola vuelta (tamano nodos)."""
+        nodos, nodo = [], inicio
+        for _ in range(self.tamano):
+            nodos.append(nodo)
+            nodo = nodo.siguiente
+        return nodos
+
+
 # =====================================================================
 #  UTILIDADES DE DIBUJO (compartidas por todas las pantallas)
 # =====================================================================
@@ -204,8 +247,17 @@ class Pantalla(tk.Frame):
 
 
 # =====================================================================
-#  PANTALLA 1 - MONTAÑA RUSA  (usa COLA)
+#  PANTALLA 1 - MONTAÑA RUSA  (usa COLA + RECURSIÓN)
 # =====================================================================
+# FUNCIONALIDAD
+#   · «Llega una persona»  -> una persona se forma al FINAL de la fila.
+#   · «Llegan 3 personas»  -> llegan varias seguidas, una tras otra.
+#   · «Subir carro»        -> las primeras de la fila (el FRENTE) suben y el carro pasea.
+#   · MEJORAS: el carro cambia de velocidad según la pendiente (sube lento, baja
+#     rápido), los pasajeros levantan los brazos y se cuenta el total de viajes.
+# CONCEPTOS
+#   · COLA (FIFO): `encolar` por el final y `desencolar` por el frente (clase Cola).
+#   · RECURSIÓN: `llegan_varias` y `rodar` se llaman a sí mismas hasta su CASO BASE.
 
 class MontanaRusa(Pantalla):
     titulo = "MONTAÑA RUSA  ·  estructura: COLA"
@@ -235,14 +287,16 @@ class MontanaRusa(Pantalla):
     def construir(self):
         self.fila = Cola()                    # <<< COLA: la fila de la montaña rusa
         self.total = 0
+        self.viajes = 0                       # cuántos carros han salido
         self.camino = [(x, 370 - 120 * math.sin(math.pi * (x - 340) / 520)
                         - 45 * math.sin(3 * math.pi * (x - 340) / 520))
                        for x in range(340, 861, 4)]
         self.dibujar_pista()
         boton(self.c, 20, 75, 210, 42, "Llega una persona", "#2a9d8f", self.llega_persona)
         boton(self.c, 245, 75, 210, 42, f"Subir carro ({self.CAPACIDAD})", "#f77f00", self.subir_carro)
+        boton(self.c, 470, 75, 230, 42, "Llegan 3 personas", "#457b9d", lambda: self.llegan_varias(3))
         self.contador = self.c.create_text(ANCHO - 15, BARRA / 2, anchor="e", fill="#ffe066",
-                                           font=(FUENTE, 13, "bold"), text="Ya subieron: 0")
+                                           font=(FUENTE, 13, "bold"), text="Ya subieron: 0  ·  Viajes: 0")
         self.dibujar_nodos()
         self.mensaje("Pulsa «Llega una persona» para formar la fila")
 
@@ -292,7 +346,10 @@ class MontanaRusa(Pantalla):
             x += 130
 
     # ---------- acciones ----------
-    def llega_persona(self):
+    def llega_persona(self, despues=None):
+        """FUNCIONALIDAD: llega una persona y se forma al final de la fila (COLA).
+        `despues` (opcional): función que se ejecuta al terminar la animación;
+        así `llegan_varias` puede encadenar una llegada tras otra."""
         if self.ocupado:
             return
         if self.fila.tamano >= self.MAX_FILA:
@@ -306,13 +363,25 @@ class MontanaRusa(Pantalla):
         persona(self.c, -30, self.Y_SUELO, nombre, color, "nuevo")
         pasos = 25
         self.animar(pasos, lambda i, n: self.c.move("nuevo", (destino + 30) / pasos, 0),
-                    lambda: self._fin_llegada(nombre), ms=18)
+                    lambda: self._fin_llegada(nombre, despues), ms=18)
 
-    def _fin_llegada(self, nombre):
+    def _fin_llegada(self, nombre, despues=None):
         self.c.delete("nuevo")
         self.redibujar()
         self.ocupado = False
-        self.mensaje(f"{nombre} se formó al final de la fila  ({self.fila.tamano} en fila)")
+        carros = -(-self.fila.tamano // self.CAPACIDAD)       # división hacia arriba
+        self.mensaje(f"{nombre} se formó al final de la fila  ({self.fila.tamano} en fila, "
+                     f"{carros} carro(s) de espera)")
+        if despues:
+            despues()                                         # sigue la próxima llegada (si hay)
+
+    def llegan_varias(self, n):                               # <<< RECURSIÓN
+        """FUNCIONALIDAD: llegan `n` personas, una detrás de otra.
+        CASO BASE: n == 0 (o la fila se llenó, y `llega_persona` ya no continúa).
+        CASO RECURSIVO: llega una persona y, al terminar, se vuelve a llamar con n - 1."""
+        if n == 0 or self.ocupado:                            # CASO BASE
+            return
+        self.llega_persona(lambda: self.llegan_varias(n - 1))  # <<< RECURSIÓN (n - 1)
 
     def subir_carro(self):
         if self.ocupado:
@@ -343,6 +412,7 @@ class MontanaRusa(Pantalla):
         self.animar(pasos, caminar, lambda: self.paseo([col for _, col in pasajeros]), ms=18)
 
     def paseo(self, colores):
+        """FUNCIONALIDAD: dibuja el carro con sus pasajeros y lo manda a recorrer los rieles."""
         c = self.c
         c.delete("pasajeros")
         x0, y0 = self.camino[0]
@@ -351,23 +421,35 @@ class MontanaRusa(Pantalla):
         for j, col in enumerate(colores):
             cx = x0 - 20 + j * 20
             c.create_oval(cx - 8, y0 - 40, cx + 8, y0 - 24, fill=col, outline="#222", tags="carro")
+            c.create_line(cx - 7, y0 - 25, cx - 13, y0 - 42, fill=col, width=3, tags="carro")  # brazos
+            c.create_line(cx + 7, y0 - 25, cx + 13, y0 - 42, fill=col, width=3, tags="carro")  # arriba
         for dx in (-20, 20):
             c.create_oval(x0 + dx - 6, y0 - 8, x0 + dx + 6, y0 + 4, fill="#222", tags="carro")
         c.create_text(x0, y0 - 62, text="¡WIIII!", fill="#1d3557",
                       font=(FUENTE, 14, "bold"), tags="carro")
         ruta = self.camino + self.camino[::-1]            # ida y vuelta por los rieles
+        self.mensaje("¡El carro está en marcha! Sube despacio y baja a toda velocidad")
+        self.rodar(ruta, 0, lambda: self._fin_paseo(len(colores)))
 
-        def avanzar(i, n):
-            (xa, ya), (xb, yb) = ruta[i], ruta[i + 1]
-            c.move("carro", xb - xa, yb - ya)
-
-        self.mensaje("¡El carro está en marcha!")
-        self.animar(len(ruta) - 1, avanzar, lambda: self._fin_paseo(len(colores)), ms=9)
+    def rodar(self, ruta, i, fin):                        # <<< RECURSIÓN
+        """MEJORA: mueve el carro un tramito y se vuelve a llamar con el tramo siguiente.
+        La espera cambia con la pendiente: cuesta arriba (y baja) = más lento,
+        cuesta abajo (y sube) = más rápido, como en una montaña rusa real.
+        CASO BASE: se acabó la ruta -> se llama a `fin`.
+        CASO RECURSIVO: avanza al tramo i + 1 (a través de `after`, para animar sin congelar)."""
+        if i >= len(ruta) - 1:                            # CASO BASE
+            fin()
+            return
+        (xa, ya), (xb, yb) = ruta[i], ruta[i + 1]
+        self.c.move("carro", xb - xa, yb - ya)
+        demora = max(3, int(9 + (ya - yb) * 1.5))         # ya - yb > 0: el carro está subiendo
+        self.after(demora, self.rodar, ruta, i + 1, fin)  # <<< RECURSIÓN (tramo siguiente)
 
     def _fin_paseo(self, k):
         self.c.delete("carro")
         self.total += k
-        self.c.itemconfig(self.contador, text=f"Ya subieron: {self.total}")
+        self.viajes += 1
+        self.c.itemconfig(self.contador, text=f"Ya subieron: {self.total}  ·  Viajes: {self.viajes}")
         self.redibujar()
         self.ocupado = False
         self.mensaje(f"¡{k} visitantes disfrutaron el viaje! Quedan {self.fila.tamano} en la fila")
@@ -627,6 +709,184 @@ class Fuegos(Pantalla):
 
 
 # =====================================================================
+#  PANTALLA 4 - RUEDA DE CHICAGO  (usa LISTA CIRCULAR + RECURSIÓN)
+# =====================================================================
+# FUNCIONALIDAD
+#   · «Subir persona»  -> sube un visitante a la cabina que está en el andén.
+#   · «Bajar persona»  -> baja al visitante de la cabina del andén.
+#   · «Girar un paso»  -> la rueda avanza una cabina:  actual = actual.siguiente.
+#   · «Dar una vuelta completa» -> gira CABINAS veces seguidas y `actual` vuelve
+#     al mismo nodo del que partió (eso demuestra que la lista es CIRCULAR).
+#   · Abajo se dibujan los nodos reales; la etiqueta «actual» salta de nodo en nodo
+#     y, al llegar al último, vuelve al primero.
+# CONCEPTOS
+#   · LISTA CIRCULAR ENLAZADA (clase ListaCircular): cada cabina es un Nodo y el
+#     último nodo apunta de nuevo al primero. Reutiliza el mismo `Nodo` de Cola y Pila.
+#   · RECURSIÓN: `vuelta` se llama a sí misma con un giro menos hasta llegar a 0.
+
+class RuedaChicago(Pantalla):
+    titulo = "RUEDA DE CHICAGO  ·  estructura: LISTA CIRCULAR"
+    CABINAS = 8
+    PASO = 360 / CABINAS                      # grados entre una cabina y la siguiente (45°)
+    CX, CY, R = 640, 270, 140                 # centro y radio de la rueda
+    Y_NODOS = 505                             # altura de la fila de nodos (abajo)
+
+    def dibujar_fondo(self):
+        c = self.c
+        c.create_rectangle(0, 0, ANCHO, ALTO, fill="#bde0fe", outline="")            # cielo
+        c.create_oval(-100, 400, 400, 520, fill="#95d5b2", outline="")               # colinas
+        c.create_oval(450, 390, 1000, 530, fill="#95d5b2", outline="")
+        c.create_rectangle(0, 462, ANCHO, ALTO, fill="#6a994e", outline="")          # suelo
+        for dx in (-70, 70):                                                          # patas
+            c.create_line(self.CX, self.CY, self.CX + dx, 462, fill="#6d4c41", width=7)
+        c.create_rectangle(self.CX - 50, 442, self.CX + 50, 450, fill="#6d4c41", outline="")  # andén
+        c.create_text(self.CX, 456, text="ANDÉN", fill="#1d3557", font=(FUENTE, 9, "bold"))
+        rect_redondo(c, 10, 70, 350, 458, 18, fill="#669bbc", outline="#1d3557", width=3)     # panel
+        rect_redondo(c, 15, 470, ANCHO - 15, ALTO - PIE - 8, 16, fill="#f1faee", outline="#1d3557", width=2)
+        c.create_text(ANCHO / 2, 482, fill="#1d3557", font=(FUENTE, 11, "bold"),
+                      text="Así se guarda la lista circular: el último nodo vuelve a apuntar al primero (nunca hay None)")
+
+    def construir(self):
+        self.rueda = ListaCircular()          # <<< LISTA CIRCULAR: las cabinas de la rueda
+        for num in range(1, self.CABINAS + 1):
+            self.rueda.agregar({"num": num, "pasajero": None})   # cada nodo guarda su cabina
+        c = self.c
+        self.contador = c.create_text(ANCHO - 15, BARRA / 2, anchor="e", fill="#ffe066",
+                                      font=(FUENTE, 13, "bold"), text="")
+        boton(c, 30, 90, 300, 42, "Subir persona", "#2a9d8f", self.subir)
+        boton(c, 30, 142, 300, 42, "Bajar persona", "#e63946", self.bajar)
+        boton(c, 30, 194, 300, 42, "Girar un paso", "#f77f00", self.girar)
+        boton(c, 30, 246, 300, 42, "Dar una vuelta completa", "#7b2cbf", self.dar_vuelta)
+        c.create_text(180, 375, fill="white", font=(FUENTE, 11), width=290, justify="center",
+                      text="Cada cabina es un NODO.\n\nCada nodo apunta a la cabina siguiente y la "
+                           "última apunta de nuevo a la primera: por eso la rueda puede girar sin fin.")
+        self.refrescar()
+        self.mensaje("Sube personas a la cabina del andén y gira la rueda")
+
+    # ---------- dibujo ----------
+    def refrescar(self):
+        self.dibujar_rueda(0)
+        self.dibujar_nodos()
+        self.c.itemconfig(self.contador, text=f"Pasajeros: {self.ocupadas()} / {self.CABINAS}")
+
+    def ocupadas(self):
+        return sum(1 for nodo in self.rueda.recorrer(self.rueda.cabeza) if nodo.dato["pasajero"])
+
+    def dibujar_rueda(self, fase):
+        """Dibuja aro, rayos y cabinas. `fase` = grados que lleva el giro en curso (0 = quieta)."""
+        c, cx, cy, r = self.c, self.CX, self.CY, self.R
+        c.delete("rueda")
+        c.create_oval(cx - r, cy - r, cx + r, cy + r, outline="#1d3557", width=5, tags="rueda")
+        c.create_oval(cx - r / 2, cy - r / 2, cx + r / 2, cy + r / 2, outline="#457b9d", width=2, tags="rueda")
+        cabinas = []
+        # <<< LISTA CIRCULAR: se recorre desde `actual`; k = 0 es la cabina del andén
+        for k, nodo in enumerate(self.rueda.recorrer(self.rueda.actual)):
+            ang = math.radians(90 + self.PASO * k - fase)     # 90° = abajo (el andén)
+            px, py = cx + r * math.cos(ang), cy + r * math.sin(ang)
+            c.create_line(cx, cy, px, py, fill="#1d3557", width=2, tags="rueda")
+            cabinas.append((px, py, nodo.dato, k))
+        for px, py, cab, k in cabinas:                        # las cabinas van encima de los rayos
+            pasajero = cab["pasajero"]
+            color = pasajero[1] if pasajero else "#6c757d"
+            borde = "#ffe066" if (k == 0 and fase == 0) else "#1d3557"
+            rect_redondo(c, px - 24, py, px + 24, py + 30, 8, fill=color, outline=borde, width=3, tags="rueda")
+            c.create_text(px, py + 15, text=pasajero[0] if pasajero else str(cab["num"]),
+                          fill="white", font=(FUENTE, 8, "bold"), tags="rueda")
+            c.create_oval(px - 3, py - 3, px + 3, py + 3, fill="white", outline="#1d3557", tags="rueda")
+        c.create_oval(cx - 12, cy - 12, cx + 12, cy + 12, fill="#e63946", outline="white", width=3, tags="rueda")
+
+    def dibujar_nodos(self):
+        """Dibuja los nodos reales (siempre en el mismo orden, desde la cabeza)."""
+        c, y, paso = self.c, self.Y_NODOS, 108
+        c.delete("nodos")
+        nodos = self.rueda.recorrer(self.rueda.cabeza)
+        for i, nodo in enumerate(nodos):
+            x = 18 + paso * i
+            pasajero = nodo.dato["pasajero"]
+            color = pasajero[1] if pasajero else "#8d99ae"
+            texto = pasajero[0] if pasajero else f"cabina {nodo.dato['num']}"
+            rect_redondo(c, x, y, x + 96, y + 28, 8, fill=color, outline="#1d3557", width=2, tags="nodos")
+            c.create_text(x + 34, y + 14, text=texto, fill="white", font=(FUENTE, 10, "bold"), tags="nodos")
+            c.create_line(x + 68, y, x + 68, y + 28, fill="white", width=2, tags="nodos")
+            c.create_oval(x + 79, y + 11, x + 85, y + 17, fill="white", tags="nodos")
+            if i < len(nodos) - 1:     # apunta al siguiente nodo
+                c.create_line(x + 82, y + 14, x + paso - 2, y + 14, arrow="last", fill="#1d3557", width=2, tags="nodos")
+            else:                      # <<< LISTA CIRCULAR: el último vuelve a apuntar al primero
+                c.create_line(x + 82, y + 17, x + 82, y + 38, 18 + 48, y + 38, 18 + 48, y + 30,
+                              arrow="last", fill="#e63946", width=2, tags="nodos")
+            etiqueta = " y ".join(t for t, ok in (("cabeza", i == 0), ("actual", nodo is self.rueda.actual)) if ok)
+            if etiqueta:
+                c.create_text(x + 48, y - 9, text=etiqueta, fill="#e63946", font=(FUENTE, 10, "bold"), tags="nodos")
+
+    # ---------- acciones ----------
+    def subir(self):
+        """FUNCIONALIDAD: sube una persona a la cabina del andén (el nodo `actual`)."""
+        if self.ocupado:
+            return
+        cabina = self.rueda.actual.dato
+        if cabina["pasajero"]:
+            self.mensaje("La cabina del andén ya está ocupada: gira la rueda para liberar otra")
+            return
+        cabina["pasajero"] = (random.choice(NOMBRES), random.choice(COLORES_GENTE))
+        self.refrescar()
+        self.mensaje(f"{cabina['pasajero'][0]} subió a la cabina {cabina['num']}")
+
+    def bajar(self):
+        """FUNCIONALIDAD: baja al pasajero de la cabina del andén."""
+        if self.ocupado:
+            return
+        cabina = self.rueda.actual.dato
+        if not cabina["pasajero"]:
+            self.mensaje("La cabina del andén está vacía")
+            return
+        nombre = cabina["pasajero"][0]
+        cabina["pasajero"] = None
+        self.refrescar()
+        self.mensaje(f"{nombre} bajó de la cabina {cabina['num']}")
+
+    def mover(self, fin):
+        """Anima un giro de 45° y, al terminar, mueve el puntero `actual` al nodo siguiente."""
+        self.ocupado = True
+        pasos = 15
+
+        def paso(i, n):                                       # durante la animación solo se dibuja
+            self.dibujar_rueda(self.PASO * (i + 1) / n)
+
+        def terminar():
+            self.rueda.girar()                                # <<< LISTA CIRCULAR: actual = actual.siguiente
+            self.refrescar()
+            fin()
+
+        self.animar(pasos, paso, terminar, ms=20)
+
+    def girar(self):
+        """FUNCIONALIDAD: la rueda avanza una cabina."""
+        if self.ocupado:
+            return
+        self.mover(self._fin_giro)
+
+    def _fin_giro(self):
+        self.ocupado = False
+        self.mensaje(f"La rueda giró: ahora la cabina {self.rueda.actual.dato['num']} está en el andén")
+
+    def dar_vuelta(self):
+        """FUNCIONALIDAD: gira una vuelta completa (CABINAS giros seguidos)."""
+        if self.ocupado:
+            return
+        self.mensaje("¡La rueda da una vuelta completa!")
+        self.vuelta(self.CABINAS)
+
+    def vuelta(self, restantes):                              # <<< RECURSIÓN
+        """CASO BASE: restantes == 0 -> terminó la vuelta (actual volvió al mismo nodo).
+        CASO RECURSIVO: gira un paso y, al terminar, se llama con restantes - 1."""
+        if restantes == 0:                                    # CASO BASE
+            self.ocupado = False
+            self.mensaje("Vuelta completa: «actual» volvió al nodo de salida (la lista es circular)")
+            return
+        self.mover(lambda: self.vuelta(restantes - 1))        # <<< RECURSIÓN (un giro menos)
+
+
+# =====================================================================
 #  MENÚ PRINCIPAL  +  APLICACIÓN
 # =====================================================================
 
@@ -638,6 +898,8 @@ PANTALLAS = [
      "descr": "Registra quejas y deshaz la última.\nEl último en llegar es el primero en salir."},
     {"titulo": "Fuegos artificiales", "estructura": "RECURSIVIDAD", "color": "#7b2cbf", "clase": Fuegos,
      "descr": "Cierra el parque con un show.\nCada explosión nace de otra explosión."},
+    {"titulo": "Rueda de Chicago", "estructura": "LISTA CIRCULAR", "color": "#f77f00", "clase": RuedaChicago,
+     "descr": "Sube gente a las cabinas y gira la rueda.\nEl último nodo apunta de nuevo al primero."},
 ]
 
 
@@ -675,7 +937,7 @@ class Menu(tk.Frame):
                                  outline="white", width=4, tags=tag)
             c.create_text(x + ancho / 2, 215, text=p["titulo"], fill="white",
                           font=(FUENTE, 19, "bold"), tags=tag, width=ancho - 20, justify="center")
-            rect_redondo(c, x + 25, 255, x + ancho - 25, 290, 14, fill="white", outline="", tags=tag)
+            rect_redondo(c, x + 12, 255, x + ancho - 12, 290, 14, fill="white", outline="", tags=tag)
             c.create_text(x + ancho / 2, 272, text=p["estructura"], fill=p["color"],
                           font=(FUENTE, 13, "bold"), tags=tag)
             c.create_text(x + ancho / 2, 350, text=p["descr"], fill="white", font=(FUENTE, 11),
