@@ -588,18 +588,33 @@ class Reclamos(Pantalla):
 # =====================================================================
 #  PANTALLA 3 - FUEGOS ARTIFICIALES  (usa RECURSIVIDAD)
 # =====================================================================
-# Toda función recursiva tiene:
-#   · CASO BASE: cuándo se detiene.
-#   · CASO RECURSIVO: se llama a sí misma con un problema más pequeño.
-# Aquí hay 4 funciones recursivas: cuenta_regresiva, espectaculo,
-# subir_cohete y explosion. Las 3 primeras se llaman a sí mismas a través
-# de `after` (para que haya animación sin congelar la ventana); `explosion`
-# se llama directamente a sí misma y dibuja un fractal de chispas.
+# FUNCIONALIDAD
+#   · «Iniciar cierre del parque» -> cuenta regresiva y un show de 6 cohetes; cada
+#     cohete explota con MÁS profundidad que el anterior (1, 2, 3, 4, 4, 4).
+#   · Botones 1-4 + clic en el cielo -> lanza un cohete con la profundidad elegida.
+#   · El panel de abajo cuenta EN VIVO cuántas chispas dibuja cada nivel y cuántas
+#     veces se llamó a `explosion`: así se ve cómo la recursión se multiplica.
+#   · Cada nivel tiene su color, y el punto en la punta de cada chispa es el lugar
+#     donde nace la siguiente llamada recursiva (una explosión más pequeña).
+#   · Cada nivel aparece un instante después del anterior: se ve cómo cada
+#     generación nace de la anterior.
+# CONCEPTOS
+#   · RECURSIVIDAD. Toda función recursiva tiene:
+#       - CASO BASE: cuándo se detiene.
+#       - CASO RECURSIVO: se llama a sí misma con un problema más pequeño.
+#   · Aquí hay 4 funciones recursivas: cuenta_regresiva, espectaculo, subir_cohete
+#     y explosion. Las 3 primeras se llaman a sí mismas a través de `after` (para
+#     que haya animación sin congelar la ventana); `explosion` se llama directamente
+#     a sí misma (dos veces por chispa) y dibuja un fractal.
 
 class Fuegos(Pantalla):
     titulo = "CIERRE CON FUEGOS ARTIFICIALES  ·  RECURSIVIDAD"
-    RAYOS = 7
-    COLORES = ["#ff595e", "#ffca3a", "#8ac926", "#1982c4", "#c77dff", "#ff9f1c", "#4cc9f0"]
+    RAYOS = 5                    # chispas por explosión
+    NIVEL_MAX = 4                # profundidad máxima (más de 4 serían miles de chispas)
+    COHETES = 6                  # cohetes del show
+    DEMORA = 350                 # ms que tarda en aparecer cada nivel de chispas
+    VIDA = 1500                  # ms que dura cada chispa en pantalla
+    COLORES_NIVEL = {4: "#ff595e", 3: "#ff9f1c", 2: "#ffd166", 1: "#caffbf"}   # un color por nivel
 
     def dibujar_fondo(self):
         c = self.c
@@ -624,24 +639,67 @@ class Fuegos(Pantalla):
 
     def construir(self):
         self.activo = False
-        boton(self.c, ANCHO / 2 - 140, 75, 280, 44, "Iniciar cierre del parque", "#7b2cbf", self.iniciar)
-        self.c.create_text(ANCHO / 2, 140, fill="#adb5bd", font=(FUENTE, 11),
-                           text="…o haz clic en el cielo para lanzar tus propios cohetes")
-        self.c.bind("<Button-1>", self.clic_cielo)
+        c = self.c
+        boton(c, ANCHO / 2 - 140, 75, 280, 44, "Iniciar cierre del parque", "#7b2cbf", self.iniciar)
+        c.create_text(ANCHO / 2 - 135, 158, anchor="e", fill="#ffd166", font=(FUENTE, 12, "bold"),
+                      text="Profundidad de la recursión:")
+        self.xs_nivel = {}
+        for n in range(1, self.NIVEL_MAX + 1):                  # botones 1, 2, 3, 4
+            self.xs_nivel[n] = ANCHO / 2 - 120 + (n - 1) * 60
+            boton(c, self.xs_nivel[n], 142, 50, 32, str(n), "#3a0ca3",
+                  lambda n=n: self.elegir_profundidad(n), 13)
+        self.marca = c.create_rectangle(0, 0, 0, 0, outline="#ffe066", width=3)   # marca el botón elegido
+        c.create_text(ANCHO / 2, 200, fill="#adb5bd", font=(FUENTE, 11),
+                      text="…o haz clic en el cielo para lanzar un cohete con esa profundidad")
+        self.dibujar_panel()
+        self.elegir_profundidad(3)
+        c.bind("<Button-1>", self.clic_cielo)
         self.mensaje("El parque está por cerrar")
+
+    def elegir_profundidad(self, n):
+        """FUNCIONALIDAD: cuántos niveles de recursión tendrá el cohete lanzado con un clic."""
+        self.profundidad = n
+        x = self.xs_nivel[n]
+        self.c.coords(self.marca, x - 3, 139, x + 53, 177)
+        self.mensaje(f"Profundidad {n}: la explosión se llama a sí misma {n} nivel(es) (nivel 0 = caso base)")
+
+    def dibujar_panel(self):
+        """Panel inferior: muestra EN VIVO cuántas chispas dibuja cada nivel y cuántas llamadas hubo."""
+        c = self.c
+        rect_redondo(c, 250, 476, ANCHO - 15, 552, 14, fill="#0b1026", outline="#4361ee", width=2)
+        c.create_text(567, 490, fill="#adb5bd", font=(FUENTE, 10),
+                      text="explosion(nivel): dibuja chispas y, en la punta de cada una, se llama con nivel - 1")
+        self.txt_nivel = {}
+        for k, n in enumerate(range(self.NIVEL_MAX, 0, -1)):    # Nivel 4, 3, 2, 1
+            self.txt_nivel[n] = c.create_text(300 + 135 * k, 513, anchor="w", fill=self.COLORES_NIVEL[n],
+                                              font=(FUENTE, 12, "bold"), text="")
+        self.txt_llamadas = c.create_text(567, 536, fill="#ffd166", font=(FUENTE, 12, "bold"), text="")
+        self.reiniciar_conteo()
+
+    def reiniciar_conteo(self):
+        self.conteo = {n: 0 for n in range(1, self.NIVEL_MAX + 1)}   # chispas dibujadas por nivel
+        self.llamadas = 0                                            # veces que se llamó a `explosion`
+        self.mostrar_conteo()
+
+    def mostrar_conteo(self):
+        for n, texto in self.txt_nivel.items():
+            self.c.itemconfig(texto, text=f"Nivel {n}: {self.conteo[n]}")
+        self.c.itemconfig(self.txt_llamadas, text=f"Llamadas a explosion(): {self.llamadas}")
 
     def clic_cielo(self, evento):
         actual = self.c.find_withtag("current")
         if actual and any(t.startswith("btn") for t in self.c.gettags(actual[0])):
             return                                   # fue un clic en un botón, no en el cielo
         if BARRA < evento.y < 470:
-            self.lanzar(evento.x, evento.y)
+            self.reiniciar_conteo()
+            self.lanzar(evento.x, evento.y, self.profundidad)
 
     def iniciar(self):
         if self.activo:
             return
         self.activo = True
         self.c.delete("final")
+        self.reiniciar_conteo()
         self.mensaje("¡Prepárense para el cierre!")
         self.cuenta_regresiva(3)
 
@@ -651,20 +709,26 @@ class Fuegos(Pantalla):
         if n == 0:                                   # CASO BASE
             self.c.create_text(ANCHO / 2, 250, text="¡FUEGO!", fill="#ffd166",
                                font=(FUENTE, 70, "bold"), tags="cuenta")
-            self.after(700, self.c.delete, "cuenta")
-            self.after(700, self.espectaculo, 6)
+            self.c.create_text(ANCHO / 2, 325, text="cuenta_regresiva(0)  ←  CASO BASE: aquí se detiene",
+                               fill="#adb5bd", font=(FUENTE, 13, "bold"), tags="cuenta")
+            self.after(1100, self.c.delete, "cuenta")
+            self.after(1100, self.espectaculo, self.COHETES)
             return
         self.c.create_text(ANCHO / 2, 250, text=str(n), fill="#ffd166",
                            font=(FUENTE, 90, "bold"), tags="cuenta")
+        self.c.create_text(ANCHO / 2, 325, text=f"cuenta_regresiva({n})  →  se llama con {n - 1}",
+                           fill="#adb5bd", font=(FUENTE, 13, "bold"), tags="cuenta")
         self.after(800, self.cuenta_regresiva, n - 1)   # <<< RECURSIÓN (n-1)
 
     # ---------- recursión 2: espectáculo ----------
     def espectaculo(self, cohetes):
         if cohetes == 0:                             # CASO BASE: no quedan cohetes
-            self.after(2500, self.fin_show)
+            self.after(2600, self.fin_show)
             return
-        self.lanzar(random.randint(120, 780), random.randint(110, 260))
-        self.after(900, self.espectaculo, cohetes - 1)  # <<< RECURSIÓN (un cohete menos)
+        nivel = min(self.COHETES + 1 - cohetes, self.NIVEL_MAX)   # 1, 2, 3, 4, 4, 4: cada cohete es más profundo
+        self.mensaje(f"espectaculo({cohetes}): cohete de profundidad {nivel}, luego espectaculo({cohetes - 1})")
+        self.lanzar(random.randint(150, 750), random.randint(150, 330), nivel)
+        self.after(1600, self.espectaculo, cohetes - 1)  # <<< RECURSIÓN (un cohete menos)
 
     def fin_show(self):
         self.c.create_text(ANCHO / 2, 250, text="¡Gracias por visitar el parque!\nHasta mañana",
@@ -673,39 +737,54 @@ class Fuegos(Pantalla):
         self.activo = False
 
     # ---------- recursión 3: el cohete sube ----------
-    def lanzar(self, x, y_objetivo):
-        self.subir_cohete(x, 500, y_objetivo, random.choice(self.COLORES))
+    def lanzar(self, x, y_objetivo, nivel):
+        """Lanza un cohete que explotará con `nivel` niveles de recursión."""
+        margen = 80 * (1 - 0.55 ** nivel) / 0.45     # cuánto se extiende la explosión (suma de radios)
+        x = min(max(x, margen + 5), ANCHO - margen - 5)             # para que no se salga de la pantalla
+        y_objetivo = min(max(y_objetivo, BARRA + margen + 15), 470 - margen)   # +15: el cohete sube de 9 en 9 y se pasa un poco
+        self.subir_cohete(x, 470, y_objetivo, nivel)
 
-    def subir_cohete(self, x, y, y_final, color):
+    def subir_cohete(self, x, y, y_final, nivel):
         if y <= y_final:                             # CASO BASE: llegó arriba -> explota
-            self.explosion(x, y, 75, 3, color)
+            self.explosion(x, y, 80, nivel)
             return
         estela = self.c.create_line(x, y, x, y + 16, fill="#ffe8a3", width=3)
         self.after(220, self.c.delete, estela)
-        self.after(14, self.subir_cohete, x, y - 9, y_final, color)  # <<< RECURSIÓN (sube 9 px)
+        self.after(14, self.subir_cohete, x, y - 9, y_final, nivel)  # <<< RECURSIÓN (sube 9 px)
 
     # ---------- recursión 4: la explosión (fractal) ----------
-    def explosion(self, x, y, radio, nivel, color, rayo=0, retraso=0):
+    def explosion(self, x, y, radio, nivel, rayo=0, retraso=0):
         """
-        Dibuja una explosión: de (x, y) salen RAYOS chispas y, del final de
-        cada chispa, nace una explosión más pequeña (nivel - 1).
-          - `nivel`: profundidad. Con nivel 0 no se dibuja nada (CASO BASE).
-          - `rayo`: cuál chispa toca dibujar (sustituye a un for).
-          - `retraso`: ms de espera; las sub-explosiones aparecen después.
+        Cada llamada dibuja UNA chispa (la número `rayo`) y hace DOS llamadas recursivas:
+          1) HACIA ADENTRO: en la punta de la chispa nace una explosión más chica (nivel - 1).
+          2) HACIA ADELANTE: la siguiente chispa de esta misma explosión (rayo + 1);
+             esta llamada sustituye a un `for`.
+        Parámetros:
+          - `nivel`: niveles de recursión que quedan. Con nivel 0 no se dibuja nada.
+          - `retraso`: ms de espera; cada nivel aparece DEMORA ms después del anterior,
+            así se ve cómo cada generación nace de la anterior.
         """
+        self.after(retraso, self.contar_llamada)     # (solo para el contador del panel)
         if nivel == 0 or rayo == self.RAYOS:         # CASO BASE
             return
         ang = 2 * math.pi * rayo / self.RAYOS + nivel
         nx, ny = x + radio * math.cos(ang), y + radio * math.sin(ang)
-        self.after(retraso, self.chispa, x, y, nx, ny, color if nivel > 1 else "#fff3b0", nivel)
-        self.explosion(nx, ny, radio * 0.55, nivel - 1, color, 0, retraso + 150)  # <<< RECURSIÓN (hacia adentro)
-        self.explosion(x, y, radio, nivel, color, rayo + 1, retraso)              # <<< RECURSIÓN (siguiente rayo)
+        self.after(retraso, self.chispa, x, y, nx, ny, nivel)
+        self.explosion(nx, ny, radio * 0.55, nivel - 1, 0, retraso + self.DEMORA)  # <<< RECURSIÓN (hacia adentro)
+        self.explosion(x, y, radio, nivel, rayo + 1, retraso)                      # <<< RECURSIÓN (siguiente rayo)
 
-    def chispa(self, x, y, nx, ny, color, nivel):
+    def chispa(self, x, y, nx, ny, nivel):
+        """Dibuja una chispa del color de su nivel y suma 1 al contador de ese nivel."""
+        color = self.COLORES_NIVEL[nivel]
         linea = self.c.create_line(x, y, nx, ny, fill=color, width=nivel, capstyle="round")
-        punta = self.c.create_oval(nx - nivel - 1, ny - nivel - 1, nx + nivel + 1, ny + nivel + 1,
-                                   fill="#fff3b0", outline="")
-        self.after(550, self.c.delete, linea, punta)
+        punta = self.c.create_oval(nx - 3, ny - 3, nx + 3, ny + 3, fill=color, outline="white")  # aquí nace la próxima llamada
+        self.after(self.VIDA, self.c.delete, linea, punta)
+        self.conteo[nivel] += 1
+        self.mostrar_conteo()
+
+    def contar_llamada(self):
+        self.llamadas += 1
+        self.c.itemconfig(self.txt_llamadas, text=f"Llamadas a explosion(): {self.llamadas}")
 
 
 # =====================================================================
